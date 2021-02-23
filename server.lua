@@ -16,6 +16,26 @@ xpcall(function()
 		f:close()
 	end
 
+function printT(...) -- print with a timestamp
+	local string = ''
+	for i = 1, select('#', ...) do
+		string = string..select(i, ...)
+	end
+	string = '['..os.date("%I:%M:%S")..'] '..string
+	print(string)
+	save_log(string)
+end
+
+function save_log(...)
+	f = io.open('./logs/'..os.date("%d-%m-%y"), "a")
+	local log = ''
+	for i = 1, select('#', ...) do
+		log = log..select(i, ...)
+	end
+	f:write(log.."\n")
+	f:close()
+end
+
 -------- SERVER BODY
 
 	-- init server socket
@@ -48,7 +68,7 @@ xpcall(function()
 					local ok, err = real:connect(host, https and 443 or 80)
 					if not ok then
 						if err ~= "timeout" then
-							print(client.nick .. ": authenticateCheckToken: failed to connect to authentication endpoint: " .. err)
+							printT(client.nick .. ": authenticateCheckToken: failed to connect to authentication endpoint: " .. err)
 							return nil, err
 						end
 						coroutine.yield(real)
@@ -59,12 +79,12 @@ xpcall(function()
 							protocol = "tlsv1_2",
 						})
 						if not real then
-							print(client.nick .. ": authenticateCheckToken: ssl.wrap failed: " .. err)
+							printT(client.nick .. ": authenticateCheckToken: ssl.wrap failed: " .. err)
 							return nil, err
 						end
 						ok, err = real:dohandshake()
 						if not ok then
-							print(client.nick .. ": authenticateCheckToken: dohandshake failed: " .. err)
+							printT(client.nick .. ": authenticateCheckToken: dohandshake failed: " .. err)
 							return nil, err
 						end
 					end
@@ -84,20 +104,20 @@ xpcall(function()
 			sink = ltn12.sink.table(buf),
 		})
 		if not ok then
-			print(client.nick .. ": authenticateCheckToken: http.request failed: " .. code)
+			printT(client.nick .. ": authenticateCheckToken: http.request failed: " .. code)
 			return
 		end
 		if code ~= 200 then
-			print(client.nick .. ": authenticateCheckToken: non-200 status code: " .. code)
+			printT(client.nick .. ": authenticateCheckToken: non-200 status code: " .. code)
 			return
 		end
 		local ok, jsonData = pcall(cjson.decode, table.concat(buf))
 		if not ok then
-			print(client.nick .. ": authenticateCheckToken: bad json")
+			printT(client.nick .. ": authenticateCheckToken: bad json")
 			return
 		end
 		if jsonData.Status ~= "OK" then
-			print(client.nick .. ": authenticateCheckToken: failed: " .. jsonData.Status)
+			printT(client.nick .. ": authenticateCheckToken: failed: " .. jsonData.Status)
 			return
 		end
 		return true
@@ -105,21 +125,21 @@ xpcall(function()
 	local function authenticateGetPayload(client, token)
 		local payloadb64 = token:match("^[^%.]+%.([^%.]+)%.[^%.]+$")
 		if not payloadb64 then
-			print(client.nick .. ": authenticateGetPayload: no payload")
+			printT(client.nick .. ": authenticateGetPayload: no payload")
 			return
 		end
 		local ok, payload = pcall(mime.unb64, payloadb64 .. ("="):rep((#payloadb64 % 4) > 0 and (4 - #payloadb64 % 4) or 0))
 		if not ok or not payload then
-			print(client.nick .. ": authenticateGetPayload: bad base64")
+			printT(client.nick .. ": authenticateGetPayload: bad base64")
 			return
 		end
 		local ok, jsonData = pcall(cjson.decode, payload)
 		if not ok then
-			print(client.nick .. ": authenticateGetPayload: bad json")
+			printT(client.nick .. ": authenticateGetPayload: bad json")
 			return
 		end
 		if type(jsonData) ~= "table" or not jsonData.sub or jsonData.sub:find("[^0-9]") then
-			print(client.nick .. ": authenticateGetPayload: bad payload")
+			printT(client.nick .. ": authenticateGetPayload: bad payload")
 			return
 		end
 		return jsonData
@@ -211,7 +231,7 @@ xpcall(function()
 
 	-- leave a room
 	function leave(room,uid)
-		print((clients[uid] and clients[uid].nick or "UNKNOWN").." left "..room)
+		printT((clients[uid] and clients[uid].nick or "UNKNOWN").." left "..room)
 		if clients[uid] then
 			sendroomexcept(room,uid,"\18"..string.char(uid))
 		end
@@ -224,7 +244,7 @@ xpcall(function()
 		end
 		if #rooms[room]==0 then
 			rooms[room]=nil
-			print("Deleted room '"..room.."'")
+			printT("Deleted room '"..room.."'")
 		end
 		if clients[uid] then
 			onChat(clients[uid],-2,room)
@@ -234,10 +254,10 @@ xpcall(function()
 	-- join a room
 	function join(room,id)
 		local client=clients[id]
-		print(client.nick.." joined "..room)
+		printT(client.nick.." joined "..room)
 		if not rooms[room] then
 			rooms[room]={}
-			print("Created room '"..room.."'")
+			printT("Created room '"..room.."'")
 		end
 		client.room=room
 
@@ -258,7 +278,7 @@ xpcall(function()
 				leave(room, uid)
 				if not rooms[room] then
 					rooms[room]={}
-					print("Re-created room '"..room.."' due to error")
+					printT("Re-created room '"..room.."' due to error")
 				end
 			end
 		end
@@ -277,11 +297,11 @@ xpcall(function()
 		table.insert(rooms[room],id)
 		sendroomexcept(room,id,"\17"..string.char(id)..client.nick.."\0")
 		if #rooms[room]>1 then
-			--print("asking "..rooms[room][1].." to provide sync")
+			--printT("asking "..rooms[room][1].." to provide sync")
 			--clients[rooms[room][1]].socket:send("\128"..string.char(id))
 			for i,v in ipairs(rooms[room]) do
 				if clients[v].nick and clients[v].nick:find("%[CHAT%]") ~= 1 then
-					print("asking "..clients[v].nick.." to provide sync")
+					printT("asking "..clients[v].nick.." to provide sync")
 					clients[v].socket:send("\128"..string.char(id))
 					askedforsync[id] = v
 					return
@@ -302,7 +322,7 @@ xpcall(function()
 					message = message..": "..reason
 				end
 				serverMsg(client, message, 255, 50, 50)
-				print(who.." kicked "..client.nick.." from "..client.room.." ("..reason..")")
+				printT(who.." kicked "..client.nick.." from "..client.room.." ("..reason..")")
 				disconnect(uid, "kicked by "..who..": "..reason)
 			end
 		end
@@ -354,7 +374,7 @@ xpcall(function()
 			local authenticated = false
 			for authAttempt = 1, 2 do
 				client.socket:send("\3")
-				print("authentication request sent to " .. client.nick)
+				printT("authentication request sent to " .. client.nick)
 				if char() == "\1" then
 					local token = nullstr()
 					local tokenPayload = authenticateGetPayload(client, token)
@@ -365,11 +385,11 @@ xpcall(function()
 						--   to be valid, which is why authenticateGetPayload does such limited validation.
 						if tokenCache[tokenPayload.sub] == token and tokenPayload.iat + config.authtokenmaxage >= os.time() then
 							authenticated = true
-							print("cached authentication token reused by " .. client.nick)
+							printT("cached authentication token reused by " .. client.nick)
 						elseif authenticateCheckToken(client, token) then
 							tokenCache[tokenPayload.sub] = token
 							authenticated = true
-							print("accepted and cached authentication token from " .. client.nick)
+							printT("accepted and cached authentication token from " .. client.nick)
 						end
 					end
 					if authenticated then
@@ -380,12 +400,12 @@ xpcall(function()
 							end
 						end
 						if client.nick ~= tokenPayload.name then
-							print(client.nick .. ": renamed to " .. tokenPayload.name)
+							printT(client.nick .. ": renamed to " .. tokenPayload.name)
 							client.nick = tokenPayload.name
 						end
 						break
 					else
-						print("authentication token invalid or expired, asking for a new one")
+						printT("authentication token invalid or expired, asking for a new one")
 					end
 				else
 					cannotAuthenticate = true
@@ -409,7 +429,7 @@ xpcall(function()
 						break
 					end
 				end
-				print(oldName .. " is a guest, renaming to " .. newName)
+				printT(oldName .. " is a guest, renaming to " .. newName)
 				client.nick = newName
 				client.guest = true
 			elseif not authenticated then
@@ -428,13 +448,13 @@ xpcall(function()
 			end
 			client.socket:send("\1")
 		end
-		print(client.nick.." done identifying")
+		printT(client.nick.." done identifying")
 		join(client.guest and "guest" or "null",id)
 		while 1 do
 			local cmd=byte()
-			--if cmd~=32 and cmd~=33 and cmd~=34 then
-			--	print("Got ["..cmd.."] from "..client.nick)
-			--end
+			-- if cmd~=32 and cmd~=33 and cmd~=34 then
+			-- 	printT("Got ["..cmd.."] from "..client.nick)
+			-- end
 			if cmd~=16 and cmd~=19 and cmd~=20 and cmd~=21 then --handled separately with more info
 				if onChat(client,cmd) then --allow any events to be canceled with hooks
 					cmd=0 --hack
@@ -462,7 +482,7 @@ xpcall(function()
 				elseif #msg > 200 then
 					serverMsg(client, "Message too long, not sent")
 				else
-					print("<"..client.nick.."> "..msg)
+					printT("<"..client.nick.."> "..msg)
 					if not onChat(client,19,msg) then
 						sendroomexcept(client.room,id,"\19"..string.char(id)..msg.."\0")
 					end
@@ -474,7 +494,7 @@ xpcall(function()
 				elseif #msg > 200 then
 					serverMsg(client, "Message too long, not sent")
 				else
-					print("* "..client.nick.." "..msg)
+					printT("* "..client.nick.." "..msg)
 					if not onChat(client,20,msg) then
 						sendroomexcept(client.room,id,"\20"..string.char(id)..msg.."\0")
 					end
@@ -593,7 +613,7 @@ xpcall(function()
 				local loc=char()..char()..char()
 				local b1,b2,b3=byte(),byte(),byte()
 				local sz=b1*65536+b2*256+b3
-				print("STAMP! Loading From "..client.nick.." size "..sz )
+				printT("STAMP! Loading From "..client.nick.." size "..sz )
 				local s,stm = bytes(client.socket,sz)
 				if s then
 					sendroomexceptLarge(client.room,id,"\66"..string.char(id)..loc..string.char(b1,b2,b3)..stm)
@@ -618,7 +638,7 @@ xpcall(function()
 				if not clients[i] then
 					disconnect(i, "Error, your client doesn't exist?")
 				else
-					print(client.nick.." provided sync for "..clients[i].nick..", it was "..sz.." bytes")
+					printT(client.nick.." provided sync for "..clients[i].nick..", it was "..sz.." bytes")
 					local s,stm = bytes(client.socket,sz)
 					if s then
 						clients[i].socket:settimeout(8)
@@ -657,11 +677,11 @@ xpcall(function()
 		local client=clients[id]
 		if not client then return end
 		client.socket:close()
-		print((client.nick or id)..": Connection to "..(client.host or"?")..":"..(client.port or"?").." closed: "..err)
+		printT((client.nick or id)..": Connection to "..(client.host or"?")..":"..(client.port or"?").." closed: "..err)
 		if client.room then
 			leave(client.room,id)
 		else
-			print"nothing to leave"
+			printT("nothing to leave")
 		end
 		clients[id]=nil
 		onChat(client,-1,err)
@@ -717,14 +737,14 @@ xpcall(function()
 					thisip = thisip + 1
 				end
 			end
-			if thisip >= 4 then
+			if thisip >= 100 then
 				conn:send("\0There are too many connections open from this ip\0")
-				print("Too many connections from this ip: "..host)
+				printT("Too many connections from this ip: "..host)
 				conn:close()
 			elseif host == "58.30.71.10" then
 				conn:close()
 			else
-				print("New connection: "..(host or"?")..":"..(port or"?"))
+				printT("New connection: "..(host or"?")..":"..(port or"?"))
 
 				-- look for free IDs
 				local hasid
@@ -733,17 +753,17 @@ xpcall(function()
 						clients[i]={socket=conn,host=host,port=port,lastping=os.time(),coro=coroutine.create(handler)}
 						coret, coerr = coroutine.resume(clients[i].coro,i,clients[i])
 						if not coret then
-							print("ERROR! "..coerr)
+							printT("ERROR! "..coerr)
 						end
 						hasid=i
 						break
 					end
 				end
 				if hasid then
-					print("Assigned ID is "..hasid)
+					printT("Assigned ID is "..hasid)
 				else
 					conn:send("\0Server has too many users\0")
-					print("No user IDs left")
+					printT("No user IDs left")
 					conn:close()
 				end
 			end
@@ -778,7 +798,7 @@ xpcall(function()
 					end
 					coret, coerr = coroutine.resume(client.coro,c)
 					if not coret then
-						print("ERROR! "..coerr)
+						printT("ERROR! "..coerr)
 					elseif coerr then
 						client.waitforconnect = coerr
 					end
